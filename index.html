@@ -20,11 +20,12 @@
             </div>
 
             <div class="form-group"> <!--se pide el numero de subredes.-->
-                <label for="subnets">Número de Subredes:</label>
+                <label for="subnets">Número de Subredes a crear:</label>
                 <!-- aqui es el espacio para introducir el numero de subredes -->
                 <input type="number" id="subnets" min="1" placeholder="4"> <!--javaScript lee este valor.-->
                 <div id="subnets-error" class="error"></div> <!-- muestra un error si el número no es válido-->
             </div>
+
             <button id="calculate">Calcular Subredes</button> <!-- boton para calcular las subredes-->
         </div>
         <!-- tabla para mostrar los resultados-->
@@ -61,13 +62,13 @@
 
             //Si la red está vacia muestra un error
             if (!networkInput) { 
-                document.getElementById('network-error').textContent = 'Por favor, ingrese una red base';
+                document.getElementById('network-error').textContent = 'Por favor, ingrese una dirección de red.';
                 isValid = false;
             }
 
             // Si el número de subredes no es válido, muestra error.
             if (isNaN(subnetsInput) || subnetsInput < 1) {
-                document.getElementById('subnets-error').textContent = 'Por favor, ingrese un número válido de subredes';
+                document.getElementById('subnets-error').textContent = 'Por favor, ingrese un número válido de subredes.';
                 isValid = false;
             }
 
@@ -100,7 +101,7 @@
 
             // Calcular subredes
             try {
-                const results = calculateSubnets(
+                const results = calculateSubnetsByNumber(
                     [parseInt(match[1]), parseInt(match[2]), parseInt(match[3]), parseInt(match[4])],
                     maskBits,
                     subnetsInput
@@ -113,44 +114,52 @@
             }
         });
         //-------------------------------------------------------------------------
-        function calculateSubnets(ip, maskBits, numSubnets) {
-            // Calcular número de bits necesarios para las subredes
+        function calculateSubnetsByNumber(ip, maskBits, numSubnets) {
+            // 1. Calcular cuántos bits se necesitan para crear el número de subredes solicitado.
+            // Por ejemplo, para 4 subredes, se necesitan 2 bits (2^2 = 4).
             const neededBits = Math.ceil(Math.log2(numSubnets));
 
-            if (maskBits + neededBits > 32) {
-                throw new Error('No hay suficientes bits para crear ' + numSubnets + ' subredes con máscara /' + maskBits);
+            // 2. Calcular la nueva máscara de subred "tomando prestados" los bits.
+            const newMaskBits = maskBits + neededBits;
+
+            // Validar si hay suficientes bits disponibles en la red.
+            if (newMaskBits > 32) {
+                throw new Error(`No hay suficientes bits para crear ${numSubnets} subredes desde una red /${maskBits}.`);
             }
 
-            // Calcular nueva máscara
-            const newMaskBits = maskBits + neededBits;
+            // El número de subredes que realmente se generarán es la potencia de 2.
+            // Si pides 3 subredes, se necesitan 2 bits, lo que crea 4 subredes.
+            const actualNumSubnets = Math.pow(2, neededBits);
+
             const newMask = calculateMaskFromBits(newMaskBits);
 
-            // Calcular número de hosts por subred
+            // 3. Calcular el número de hosts disponibles en cada nueva subred.
             const hostsPerSubnet = Math.pow(2, 32 - newMaskBits) - 2;
 
-            // Calcular el incremento entre subredes
-            const increment = Math.pow(2, 32 - newMaskBits);
+            // 4. Calcular el "salto" o incremento entre las direcciones de red de cada subred.
+            const increment = 1 << (32 - newMaskBits);
 
-            // Convertir IP a número decimal
-            const ipDecimal = (ip[0] << 24) + (ip[1] << 16) + (ip[2] << 8) + ip[3];
+            // 5. Convertir la IP de entrada a un número entero de 32 bits.
+            const ipDecimal = (ip[0] << 24) | (ip[1] << 16) | (ip[2] << 8) | ip[3];
 
-            // Generar las subredes
+            // 6. Calcular la dirección de red base de la IP original para empezar desde ahí.
+            const baseNetworkDecimal = ipDecimal & ((-1 << (32 - maskBits)) >>> 0);
+
+            // 7. Generar los datos para cada subred.
             const results = [];
-
-            //Genera los datos para cada subred para mostrarlos en la tabla
-            for (let i = 0; i < numSubnets; i++) {
-                const subnetDecimal = ipDecimal + (i * increment);
+            for (let i = 0; i < actualNumSubnets; i++) {
+                const subnetDecimal = baseNetworkDecimal + (i * increment);
                 const networkAddress = decimalToIp(subnetDecimal);
                 const broadcastAddress = decimalToIp(subnetDecimal + increment - 1);
                 const firstHost = decimalToIp(subnetDecimal + 1);
-                const lastHost = decimalToIp(subnetDecimal + increment - 2);
+                const lastHost = decimalToIp(subnetDecimal + increment - 2); // -2 porque -1 es broadcast
 
                 results.push({
                     subnet: i + 1,
                     network: networkAddress,
-                    firstHost: firstHost,
-                    lastHost: lastHost,
-                    broadcast: broadcastAddress,
+                    firstHost: (hostsPerSubnet > 0) ? firstHost : 'N/A',
+                    lastHost: (hostsPerSubnet > 0) ? lastHost : 'N/A',
+                    broadcast: broadcastAddress, 
                     mask: newMask.join('.'),
                     hosts: hostsPerSubnet
                 });
